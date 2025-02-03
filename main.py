@@ -1,5 +1,5 @@
 # -*- coding: utf8 -*-
-import requests, time, datetime, re, sys, os, json, random, math
+import requests, time, datetime, re, sys, os, json, random, math, traceback
 global skey,sckey,base_url,req_url,corpid,corpsecret,agentid,touser,toparty,totag,open_get_weather,area,qweather
 
 class MiMotion():
@@ -19,8 +19,8 @@ class MiMotion():
             # 输出发送结果
             print(res)
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
 
     # 推送server
     def push_wx(self,desp=""):
@@ -34,8 +34,20 @@ class MiMotion():
             response = requests.get(server_url, params=params).text
             print(response)
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
+
+    # 推送telegram
+    def push_telegram(self,msg):
+        try:
+            print("\nTelegram 推送开始")
+            send_data = {"chat_id": tg_user_id, "text": title + '\n\n'+content, "disable_web_page_preview": "true"}
+            response = requests.post(
+                url=f'https://api.telegram.org/bot{tg_bot_token}/sendMessage', data=send_data)
+            print(response.json()['ok'])
+        except Exception as e:
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
 
     # 企业微信
     def get_access_token(self):
@@ -45,8 +57,8 @@ class MiMotion():
             access_token = resp['access_token']
             return access_token
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
 
     def run(self,msg):
         try:
@@ -70,31 +82,32 @@ class MiMotion():
             print(resp)
             return resp
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
 
 
     def get_time(self):
         try:
-            url = "http://api.m.taobao.com/rest/api3.do?api=mtop.common.getTimestamp"
+            url = "http://mshopact.vivo.com.cn/tool/config"
             response = requests.get(url, headers=self.headers).json()
-            t = response["data"]["t"]
+            t = response["data"]["nowTime"]
             return t
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
 
     def get_app_token(self, login_token):
         try:
             url = f"https://account-cn.huami.com/v1/client/app_tokens?app_name=com.xiaomi.hm.health&dn=api-user.huami.com%2Capi-mifit.huami.com%2Capp-analytics.huami.com&login_token={login_token}"
             response = requests.get(url=url, headers=self.headers).json()
+            #print(response)
             app_token = response["token_info"]["app_token"]
             return app_token
         except Exception as e:
             print(e)
             return
-
     @staticmethod
+
     def login(user, password):
         try:
             url1 = f"https://api-user.huami.com/registrations/{user}/tokens"
@@ -110,9 +123,15 @@ class MiMotion():
             }
 
             r1 = requests.post(url=url1, data=data1, headers=headers, allow_redirects=False)
+            #print(r1)
             location = r1.headers["Location"]
             code_pattern = re.compile("(?<=access=).*?(?=&)")
-            code = code_pattern.findall(location)[0]
+            code_matches = code_pattern.findall(location)
+            if len(code_matches) > 0:
+                code = code_matches[0]
+            else:
+                print("Code not found in location")
+                return None, None
             url2 = "https://account.huami.com/v2/client/login"        
             if "+86" in user:
                 data2 = {
@@ -142,12 +161,14 @@ class MiMotion():
                     "third_name": "email",
                 }
             r2 = requests.post(url=url2, data=data2, headers=headers).json()
+            #print(r2)
             login_token = r2["token_info"]["login_token"]
             userid = r2["token_info"]["user_id"]
             return login_token, userid
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
+            return 0, None
 
     def main(self):
         try:
@@ -169,8 +190,8 @@ class MiMotion():
                 max_ratio = 0.9
                 step_ratio = random.uniform(min_ratio, max_ratio)
         except Exception as e:
-            print(e)
-            return
+            error_traceback = traceback.format_exc()
+            print(error_traceback)
         try:
             min_step = math.ceil(int(self.check_item.get("min_step", 10000))*step_ratio)
         except Exception as e:
@@ -226,13 +247,13 @@ class MiMotion():
                 msg = "\n".join([f"{one.get('name')}: {one.get('value')}" for one in msg])
                 return msg
             except Exception as e:
-                print(e)
-                return
+                error_traceback = traceback.format_exc()
+                print(error_traceback)
 
 if __name__ == "__main__":
     try:
         #with open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "/root/config.json"), "r", encoding="utf-8") as f:
-        #datas = json.loads(f.read())
+            #datas = json.loads(f.read())
         datas = json.loads(os.environ["CONFIG"])
         # 开启根据地区天气情况降低步数（默认关闭）
         if datas.get("OPEN_GET_WEATHER"):
@@ -264,7 +285,13 @@ if __name__ == "__main__":
         if datas.get("SCKEY"):
             sckey = datas.get("SCKEY")
             MiMotion(check_item=_check_item).push_wx(msg)
-
+        # 推送telegram
+        if datas.get("TG_BOT_TOKEN") or datas.get("TG_USER_ID") :
+            tg_bot_token = datas.get("TG_BOT_TOKEN")
+            tg_user_id = datas.get("TG_USER_ID")
+            MiMotion(check_item=_check_item).push_telegram(msg)
+        else:
+            print("Telegram推送的tg_bot_token或者tg_user_id未设置!!\n取消推送")
         # 企业微信推送
         # 是否开启企业微信推送false关闭true开启，默认关闭，开启后请填写设置并将上面两个都留空
         if datas.get("POSITION"):
@@ -280,4 +307,6 @@ if __name__ == "__main__":
         #推送CONFIG配置
         #MiMotion(check_item=_check_item).run(os.environ["CONFIG"])
     except Exception as e:
-        print(e)
+        # 获取报错位置的详细信息
+        error_traceback = traceback.format_exc()
+        print(error_traceback)
